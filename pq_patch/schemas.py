@@ -49,6 +49,7 @@ class VerificationOutcome(str, Enum):
     PASS = "pass"
     FAILED_COMPILE = "failed_compile"
     FAILED_TEST = "failed_test"
+    FAILED_TEST_TIMEOUT = "failed_test(timeout)"  # tests started but did not finish in time
     NEEDS_REVIEW = "needs_review"
 
 
@@ -190,6 +191,8 @@ class VerificationResult(_Model):
             raise ValueError("'failed_compile' requires compile_ok=False")
         if self.outcome is VerificationOutcome.FAILED_TEST and self.tests_passed is not False:
             raise ValueError("'failed_test' requires tests_passed=False")
+        if self.outcome is VerificationOutcome.FAILED_TEST_TIMEOUT and not (self.tests_ran and self.tests_passed is False):
+            raise ValueError("'failed_test(timeout)' requires tests_ran=True and tests_passed=False")
         return self
 
 
