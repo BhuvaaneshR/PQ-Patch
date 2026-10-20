@@ -49,14 +49,14 @@ def test_from_import_of_function_name():
 def test_fully_qualified_attribute_chain():
     r = scan(
         """
-        import cryptography.hazmat.primitives.asymmetric.dsa
-        k = cryptography.hazmat.primitives.asymmetric.dsa.generate_private_key(2048)
+        import cryptography.hazmat.primitives.asymmetric.rsa
+        k = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(65537, 2048)
         """
     )
-    assert r.findings[0].algorithm is Algorithm.DSA
+    assert r.findings[0].algorithm is Algorithm.RSA
 
 
-def test_ecdsa_and_ecdh_are_distinguished_from_generic_ec():
+def test_ecdsa_is_distinguished_from_generic_ec():
     r = scan(
         """
         from cryptography.hazmat.primitives.asymmetric import ec
@@ -64,10 +64,27 @@ def test_ecdsa_and_ecdh_are_distinguished_from_generic_ec():
 
         key = ec.generate_private_key(ec.SECP256R1())
         sig = key.sign(b"x", ec.ECDSA(hashes.SHA256()))
-        shared = key.exchange(ec.ECDH(), key.public_key())
         """
     )
-    assert [f.algorithm for f in r.findings] == [Algorithm.EC, Algorithm.ECDSA, Algorithm.ECDH]
+    assert [f.algorithm for f in r.findings] == [Algorithm.EC, Algorithm.ECDSA]
+
+
+def test_out_of_scope_primitives_are_not_flagged():
+    r = scan(
+        """
+        import rsa
+        from Crypto.PublicKey import RSA
+        from cryptography.hazmat.primitives.asymmetric import ec, dsa, dh
+
+        shared = key.exchange(ec.ECDH(), peer)
+        d = dsa.generate_private_key(2048)
+        p = dh.generate_parameters(2, 2048)
+        ct = rsa.encrypt(b"x", pub)
+        pt = rsa.decrypt(ct, priv)
+        k = RSA.generate(2048)
+        """
+    )
+    assert r.parse_ok and r.findings == []
 
 
 def test_python_rsa_and_pyca_rsa_do_not_collide():
@@ -78,17 +95,6 @@ def test_python_rsa_and_pyca_rsa_do_not_collide():
         "from cryptography.hazmat.primitives.asymmetric import rsa\nrsa.newkeys(2048)\n"
     )
     assert pyca.findings == []
-
-
-def test_pycryptodome():
-    r = scan(
-        """
-        from Crypto.PublicKey import RSA, ECC
-        a = RSA.generate(2048)
-        b = ECC.generate(curve="P-256")
-        """
-    )
-    assert [f.algorithm for f in r.findings] == [Algorithm.RSA, Algorithm.EC]
 
 
 def test_local_name_without_import_is_not_flagged():
@@ -245,6 +251,13 @@ def test_syntax_error_reported_not_skipped():
     r = scan("def broken(:\n    pass\n")
     assert not r.parse_ok and r.findings == []
     assert "SyntaxError" in r.parse_error and "line 1" in r.parse_error
+
+
+@pytest.mark.parametrize("terms", [2000, 5000])  # 2000 parses but overflows the visitor; 5000 fails in the parser
+def test_deeply_nested_source_reported_not_crashing(terms):
+    r = scan_source("x = " + "+".join(["1"] * terms) + "\n", "deep.py")
+    assert not r.parse_ok and r.findings == []
+    assert "RecursionError" in r.parse_error
 
 
 def test_null_bytes_and_bad_encoding_reported():

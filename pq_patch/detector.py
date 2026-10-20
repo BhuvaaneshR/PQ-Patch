@@ -4,6 +4,9 @@ No LLM is involved: calls are resolved through the file's imports and matched
 against fixed lookup tables, so classification is exact and reproducible.
 Unparseable files are reported, never skipped.
 
+Scope: RSA and ECDSA signing only. Key exchange (ECDH, DH), DSA and RSA
+encryption are deliberately not in the tables.
+
 Known limits (by design, for a bounded scope):
 - Only call sites are detected. Methods on already-constructed keys
   (``key.sign(...)``) need type inference and are not resolved.
@@ -28,21 +31,11 @@ CALL_TABLE: dict[str, Algorithm] = {
     f"{_PYCA}.rsa.generate_private_key": Algorithm.RSA,
     f"{_PYCA}.ec.generate_private_key": Algorithm.EC,
     f"{_PYCA}.ec.ECDSA": Algorithm.ECDSA,
-    f"{_PYCA}.ec.ECDH": Algorithm.ECDH,
-    f"{_PYCA}.dsa.generate_private_key": Algorithm.DSA,
-    f"{_PYCA}.dh.generate_parameters": Algorithm.DH,
     # python-rsa
     "rsa.newkeys": Algorithm.RSA,
     "rsa.sign": Algorithm.RSA,
     "rsa.verify": Algorithm.RSA,
-    "rsa.encrypt": Algorithm.RSA,
-    "rsa.decrypt": Algorithm.RSA,
 }
-# PyCryptodome (and its Cryptodome fork)
-for _pkg in ("Crypto", "Cryptodome"):
-    CALL_TABLE[f"{_pkg}.PublicKey.RSA.generate"] = Algorithm.RSA
-    CALL_TABLE[f"{_pkg}.PublicKey.ECC.generate"] = Algorithm.EC
-    CALL_TABLE[f"{_pkg}.PublicKey.DSA.generate"] = Algorithm.DSA
 
 # JWT libraries: function -> (keyword name carrying the algorithm(s), positional index).
 JWT_CALLS: dict[str, tuple[str, int]] = {
@@ -219,9 +212,15 @@ def scan_source(source: Union[str, bytes], filename: str = "<string>") -> FileSc
     except (ValueError, RecursionError, MemoryError) as e:
         return FileScanResult(file=filename, parse_ok=False, parse_error=f"{type(e).__name__}: {e}")
 
-    collector = _Collector(filename, _collect_imports(tree))
-    for stmt in tree.body:
-        collector.visit_stmt_top(stmt)
+    # A file can parse yet be nested too deeply for the recursive visitor.
+    try:
+        collector = _Collector(filename, _collect_imports(tree))
+        for stmt in tree.body:
+            collector.visit_stmt_top(stmt)
+    except RecursionError:
+        return FileScanResult(
+            file=filename, parse_ok=False, parse_error="RecursionError: source is nested too deeply to analyse"
+        )
     findings = sorted(collector.findings, key=lambda f: (f.line, f.column))
     return FileScanResult(file=filename, parse_ok=True, findings=findings)
 

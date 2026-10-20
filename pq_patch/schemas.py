@@ -5,6 +5,9 @@ the allowed shape is rejected before a human ever sees it. Verification and
 report objects are produced by deterministic code, and carry consistency
 checks so an inconsistent result (e.g. "pass" with a failed compile) cannot be
 constructed.
+
+Scope: RSA and ECDSA *signing* only, replaced by ML-DSA. Key exchange / KEM,
+DSA, DH and encryption are out of scope and are escalated, never patched.
 """
 
 from __future__ import annotations
@@ -31,20 +34,15 @@ class Algorithm(str, Enum):
     """Classical algorithm family, assigned by the deterministic detector."""
 
     RSA = "RSA"
-    EC = "EC"  # generic elliptic-curve key; ECDSA vs ECDH is decided by usage, not by the call
+    EC = "EC"  # generic elliptic-curve key; whether it signs is decided by usage, not by the call
     ECDSA = "ECDSA"
-    ECDH = "ECDH"
-    DSA = "DSA"
-    DH = "DH"
 
 
 class UsageContext(str, Enum):
     """How the key is used at a call site (decided by the planner)."""
 
     SIGNING = "signing"
-    KEY_EXCHANGE = "key_exchange"
-    KEY_GENERATION = "key_generation"
-    UNKNOWN = "unknown"
+    OTHER = "other"  # not signing (e.g. key exchange, encryption): out of scope
 
 
 class VerificationOutcome(str, Enum):
@@ -62,8 +60,7 @@ class FindingStatus(str, Enum):
 
 # Replacement algorithms the agent is allowed to propose.
 ML_DSA_ALGORITHMS = frozenset({"ML-DSA-44", "ML-DSA-65", "ML-DSA-87"})
-ML_KEM_ALGORITHMS = frozenset({"ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"})
-ALLOWED_TARGETS = ML_DSA_ALGORITHMS | ML_KEM_ALGORITHMS
+ALLOWED_TARGETS = ML_DSA_ALGORITHMS
 
 
 # --------------------------------------------------------------------------
@@ -138,10 +135,8 @@ class Plan(_Model):
     def _check_target(self) -> "Plan":
         if self.target_algorithm not in ALLOWED_TARGETS:
             raise ValueError(f"target_algorithm must be one of {sorted(ALLOWED_TARGETS)}")
-        if self.usage_context is UsageContext.SIGNING and self.target_algorithm not in ML_DSA_ALGORITHMS:
-            raise ValueError("signing usage requires an ML-DSA target")
-        if self.usage_context is UsageContext.KEY_EXCHANGE and self.target_algorithm not in ML_KEM_ALGORITHMS:
-            raise ValueError("key_exchange usage requires an ML-KEM target")
+        if self.usage_context is not UsageContext.SIGNING:
+            raise ValueError("only signing is in scope; a non-signing call site must be escalated, not planned")
         return self
 
 
