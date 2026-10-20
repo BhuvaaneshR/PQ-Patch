@@ -1,0 +1,12 @@
+{
+  "plan": {
+    "usage_context": "signing",
+    "target_algorithm": "ML-DSA-65",
+    "approach": "Replace the RSA signing key and sign/verify calls with the ML-DSA-65 signature scheme from liboqs (oqs.Signature). Keys and signatures become raw byte strings instead of PEM/DER objects.",
+    "interface_notes": "Keep the enclosing function name, parameters and return type; only the key type and the bytes it returns change.",
+    "risks": [
+      "ML-DSA keys and signatures are much larger than RSA-2048 ones.",
+      "Anything that stores or parses PEM/DER keys, or expects an RSA signature size, must change too."
+    ]
+  }
+}
