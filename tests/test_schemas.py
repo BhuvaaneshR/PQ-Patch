@@ -18,11 +18,20 @@ from pq_patch.schemas import (
 def make_finding(**kw):
     base = dict(
         file="a.py", line=5, end_line=5, column=4,
-        original_call="rsa.generate_private_key", algorithm=Algorithm.RSA,
+        original_call="rsa.generate_private_key",
+        qualified_name="cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key",
+        algorithm=Algorithm.RSA,
         enclosing_scope="make_key", scope_start_line=3, scope_end_line=8,
     )
     base.update(kw)
     return Finding(**base)
+
+
+# ---- Scope ----
+
+def test_scope_is_rsa_and_ecdsa_signing_only():
+    assert {a.value for a in Algorithm} == {"RSA", "EC", "ECDSA"}
+    assert {u.value for u in UsageContext} == {"signing", "other"}
 
 
 # ---- Finding / FileScanResult ----
@@ -66,11 +75,16 @@ def test_plan_rejects_unknown_algorithm():
         Plan(**plan_kw(target_algorithm="RSA-4096"))
 
 
-def test_plan_rejects_context_algorithm_mismatch():
+def test_plan_rejects_kem_target_out_of_scope():
     with pytest.raises(ValidationError):
-        Plan(**plan_kw(usage_context="signing", target_algorithm="ML-KEM-768"))
+        Plan(**plan_kw(target_algorithm="ML-KEM-768"))
+
+
+def test_plan_rejects_non_signing_usage():
     with pytest.raises(ValidationError):
-        Plan(**plan_kw(usage_context="key_exchange", target_algorithm="ML-DSA-65"))
+        Plan(**plan_kw(usage_context="other"))
+    with pytest.raises(ValidationError):
+        Plan(**plan_kw(usage_context="key_exchange"))  # no longer a valid context
 
 
 def test_plan_rejects_extra_fields():
@@ -156,6 +170,11 @@ def test_report_row_ready_requires_pass_patch_and_attempt():
         ReportRow(**{**base, "proposed_patch": None})
     with pytest.raises(ValidationError):
         ReportRow(**{**base, "attempts": 0})
+
+
+def test_report_row_rejects_out_of_scope_target():
+    with pytest.raises(ValidationError):
+        ReportRow(file="a.py", status="escalated", target_algorithm="ML-KEM-768", notes="x")
 
 
 def test_report_row_no_action_needed_has_no_patch():
