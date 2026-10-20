@@ -8,8 +8,9 @@ Scope: RSA and ECDSA signing only. Key exchange (ECDH, DH), DSA and RSA
 encryption are deliberately not in the tables.
 
 Known limits (by design, for a bounded scope):
-- Only call sites are detected. Methods on already-constructed keys
-  (``key.sign(...)``) need type inference and are not resolved.
+- Methods on already-constructed keys (``key.sign(...)``) need type inference and are not
+  resolved, with one exception: RSA ``sign``/``verify`` calls are recognised by the
+  ``padding.PSS`` / ``padding.PKCS1v15`` argument they must be given.
 - Imports are collected file-wide; local shadowing of an imported name is ignored.
 - Relative imports and ``from x import *`` are not resolved.
 """
@@ -36,6 +37,13 @@ CALL_TABLE: dict[str, Algorithm] = {
     "rsa.sign": Algorithm.RSA,
     "rsa.verify": Algorithm.RSA,
 }
+
+# RSA padding constructors passed to ``<key>.sign(...)`` / ``<key>.verify(...)``. The outer
+# sign/verify call is what gets reported, because that is the line a patch has to change.
+# PKCS1v15 is also used for RSA encryption, which is out of scope, so it only counts when
+# it appears inside sign()/verify().
+RSA_PADDING_CALLS = frozenset({f"{_PYCA}.padding.PKCS1v15", f"{_PYCA}.padding.PSS"})
+SIGN_METHODS = frozenset({"sign", "verify"})
 
 # JWT libraries: function -> (keyword name carrying the algorithm(s), positional index).
 JWT_CALLS: dict[str, tuple[str, int]] = {
@@ -161,7 +169,31 @@ class _Collector(ast.NodeVisitor):
 
     # --- detection --------------------------------------------------------
 
+    def _qualify(self, node: ast.AST) -> Optional[str]:
+        """Import-resolved dotted name for a Name/Attribute chain, else None."""
+        written = _dotted(node)
+        if written is None:
+            return None
+        head, _, rest = written.partition(".")
+        if head not in self.aliases:
+            return None
+        return self.aliases[head] + (f".{rest}" if rest else "")
+
+    def _rsa_padding_in_sign(self, node: ast.Call) -> Optional[str]:
+        """Qualified padding name if this is ``<key>.sign/verify(..., padding.X(...))``."""
+        if not (isinstance(node.func, ast.Attribute) and node.func.attr in SIGN_METHODS):
+            return None
+        for arg in [*node.args, *(k.value for k in node.keywords)]:
+            if isinstance(arg, ast.Call):
+                qualified = self._qualify(arg.func)
+                if qualified in RSA_PADDING_CALLS:
+                    return qualified
+        return None
+
     def visit_Call(self, node: ast.Call) -> None:
+        padding = self._rsa_padding_in_sign(node)
+        if padding is not None:
+            self._record(node, _dotted(node.func) or node.func.attr, padding, Algorithm.RSA)  # type: ignore[attr-defined]
         written = _dotted(node.func)
         if written is not None:
             head, _, rest = written.partition(".")

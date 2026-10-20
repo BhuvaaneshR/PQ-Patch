@@ -221,6 +221,70 @@ def test_python_jose_flagged_and_hmac_not():
     assert r.findings[0].qualified_name == "jose.jwt.encode[RS256]"
 
 
+@pytest.mark.parametrize(
+    "stmt,padding",
+    [
+        ("key.sign(msg, padding.PKCS1v15(), hashes.SHA256())", "PKCS1v15"),
+        ("key.verify(sig, msg, padding.PKCS1v15(), hashes.SHA256())", "PKCS1v15"),
+        ("key.sign(msg, padding.PSS(mgf=padding.MGF1(h), salt_length=32), h)", "PSS"),
+        ("key.verify(sig, msg, padding=padding.PSS(mgf=padding.MGF1(h), salt_length=32), algorithm=h)", "PSS"),
+    ],
+)
+def test_rsa_sign_verify_recognised_by_padding_argument(stmt, padding):
+    r = scan(
+        f"""
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        def op(key, msg, sig, h):
+            return {stmt}
+        """
+    )
+    assert len(r.findings) == 1
+    f = r.findings[0]
+    assert f.algorithm is Algorithm.RSA
+    assert f.original_call in ("key.sign", "key.verify")
+    assert f.qualified_name == f"cryptography.hazmat.primitives.asymmetric.padding.{padding}"
+    assert f.enclosing_scope == "op" and f.line == 6
+
+
+def test_rsa_padding_from_import_and_multiline_call():
+    r = scan(
+        """
+        from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+
+        class Alg:
+            def sign(self, key, msg):
+                return key.sign(
+                    msg,
+                    PSS(mgf=MGF1(self.hash_alg()), salt_length=PSS.MAX_LENGTH),
+                    self.hash_alg(),
+                )
+        """
+    )
+    f = r.findings[0]
+    assert len(r.findings) == 1 and f.enclosing_scope == "Alg.sign"
+    assert (f.line, f.end_line) == (6, 10)
+
+
+def test_rsa_padding_outside_sign_verify_is_not_flagged():
+    r = scan(
+        """
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        ct = key.encrypt(m, padding.PKCS1v15())
+        pt = key.decrypt(ct, padding.PKCS1v15())
+        p = padding.PSS(mgf=None, salt_length=0)
+        """
+    )
+    assert r.parse_ok and r.findings == []
+
+
+def test_sign_with_unimported_padding_is_not_flagged():
+    r = scan("sig = key.sign(msg, padding.PSS(), h)\nsig2 = other.sign(msg, helper())\n")
+    assert r.parse_ok and r.findings == []
+
+
 def test_already_quantum_safe_file_has_no_findings():
     r = scan(
         """
