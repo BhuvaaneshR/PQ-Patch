@@ -1,0 +1,18 @@
+# Secrets. Never committed, on any branch, at any point in history.
+.env
+
+# Generated logs. Commit samples/run_log_sample.jsonl instead.
+run_log.jsonl
+security_log.jsonl
+.stub_calls.log
+
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS noise
+.DS_Store
+Thumbs.db
