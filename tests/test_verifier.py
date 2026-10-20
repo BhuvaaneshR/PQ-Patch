@@ -158,14 +158,21 @@ def test_failed_test_takes_priority_over_needs_review(tmp_path):
     assert r.outcome is VerificationOutcome.FAILED_TEST and r.detector_clear is False
 
 
-def test_timeout_is_a_failed_test(tmp_path):
+def test_timeout_is_failed_test_timeout(tmp_path):
     project(
         tmp_path,
         tests="import time\nfrom signer import make_key\n\ndef test_slow():\n    time.sleep(10)\n",
     )
     r = run(tmp_path, GOOD_PATCH, test_timeout=1)
-    assert r.outcome is VerificationOutcome.FAILED_TEST
-    assert r.tests_passed is False and "timed out" in r.output
+    assert r.outcome is VerificationOutcome.FAILED_TEST_TIMEOUT
+    assert r.outcome.value == "failed_test(timeout)"
+    assert r.tests_ran and r.tests_passed is False and "timed out" in r.output
+
+
+def test_ordinary_test_failure_is_not_reported_as_timeout(tmp_path):
+    project(tmp_path)
+    r = run(tmp_path, "def make_key():\n    return None\n")
+    assert r.outcome is VerificationOutcome.FAILED_TEST and r.outcome is not VerificationOutcome.FAILED_TEST_TIMEOUT
 
 
 def test_no_tests_means_tests_not_run_but_can_still_pass(tmp_path):

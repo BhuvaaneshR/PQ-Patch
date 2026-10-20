@@ -144,6 +144,17 @@ def test_verification_failed_outcomes_must_match_evidence():
     VerificationResult(outcome="failed_test", compile_ok=True, tests_ran=True, tests_passed=False)
 
 
+def test_failed_test_timeout_outcome_must_match_evidence():
+    ok = VerificationResult(outcome="failed_test(timeout)", compile_ok=True, tests_ran=True, tests_passed=False)
+    assert ok.outcome.value == "failed_test(timeout)"
+    with pytest.raises(ValidationError):  # tests did not run
+        VerificationResult(outcome="failed_test(timeout)", compile_ok=True)
+    with pytest.raises(ValidationError):  # tests passed
+        VerificationResult(outcome="failed_test(timeout)", compile_ok=True, tests_ran=True, tests_passed=True)
+    with pytest.raises(ValidationError):  # a timeout is never a pass
+        VerificationResult(outcome="pass", compile_ok=True, detector_clear=True, tests_ran=True, tests_passed=False)
+
+
 def test_verification_tests_flags_consistent():
     with pytest.raises(ValidationError):
         VerificationResult(outcome="needs_review", compile_ok=True, tests_ran=True)

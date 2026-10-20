@@ -14,8 +14,9 @@ Three checks, in order:
    mention the module are run there under a timeout.
 
 The caller's files are never modified. Outcome mapping (see ``VerificationResult``):
-failed_compile, else failed_test if the tests ran and failed, else pass if the
-detector is clear, else needs_review.
+failed_compile, else failed_test(timeout) if the tests did not finish in time, else
+failed_test if the tests ran and failed, else pass if the detector is clear, else
+needs_review.
 
 Known limits:
 - Running the tests executes project code (and the patch) in a subprocess. The temp
@@ -177,8 +178,8 @@ def _run_tests(
     patched_source: str,
     test_paths: Optional[Sequence[str]],
     timeout: float,
-) -> tuple[bool, Optional[bool], str]:
-    """(tests_ran, tests_passed, output). Runs pytest on a temp copy with the patch applied."""
+) -> tuple[bool, Optional[bool], bool, str]:
+    """(tests_ran, tests_passed, timed_out, output). Runs pytest on a temp copy with the patch applied."""
     with tempfile.TemporaryDirectory(prefix="pq_patch_verify_") as tmp:
         sandbox = Path(tmp)
         _copy_project(project_root, sandbox)
@@ -188,7 +189,7 @@ def _run_tests(
 
         selected = list(test_paths) if test_paths else _select_tests(sandbox, rel_file)
         if not selected:
-            return False, None, "no existing tests mention this module; tests not run"
+            return False, None, False, "no existing tests mention this module; tests not run"
 
         cmd = [sys.executable, "-m", "pytest", "-q", "-x", "--no-header", "-p", "no:cacheprovider", "--color=no", *selected]
         try:
@@ -197,14 +198,14 @@ def _run_tests(
                 encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
-            return True, False, f"tests timed out after {timeout:g}s: {' '.join(selected)}"
+            return True, False, True, f"tests timed out after {timeout:g}s: {' '.join(selected)}"
 
         out = _tail((proc.stdout or "") + (proc.stderr or "")).strip()
         if "No module named pytest" in out:
-            return False, None, "pytest is not installed in this environment; tests not run"
+            return False, None, False, "pytest is not installed in this environment; tests not run"
         if proc.returncode == _PYTEST_EXIT_NO_TESTS:
-            return False, None, "pytest collected no tests; tests not run"
-        return True, proc.returncode == 0, out
+            return False, None, False, "pytest collected no tests; tests not run"
+        return True, proc.returncode == 0, False, out
 
 
 # --------------------------------------------------------------------------
@@ -241,7 +242,7 @@ def verify(
     detector_clear, detector_msg = _check_detector(finding, original_source, patched_source, filename)
     sections.append(f"[detector] {'clear' if detector_clear else 'not clear' if detector_clear is False else 'not evaluated'}: {detector_msg}")
 
-    tests_ran, tests_passed = False, None
+    tests_ran, tests_passed, timed_out = False, None, False
     if project_root is None:
         sections.append("[tests] no project root given; tests not run")
     else:
@@ -250,12 +251,15 @@ def verify(
             rel_file = Path(filename).resolve().relative_to(root)
         except ValueError:
             raise ValueError(f"{filename} is not inside the project root {root}") from None
-        tests_ran, tests_passed, tests_msg = _run_tests(
+        tests_ran, tests_passed, timed_out, tests_msg = _run_tests(
             root, rel_file, patched_source, list(test_paths) if test_paths else None, test_timeout
         )
-        sections.append(f"[tests] {'passed' if tests_passed else 'failed' if tests_ran else 'not run'}\n{tests_msg}")
+        status = "timed out" if timed_out else "passed" if tests_passed else "failed" if tests_ran else "not run"
+        sections.append(f"[tests] {status}\n{tests_msg}")
 
-    if tests_ran and tests_passed is False:
+    if timed_out:
+        outcome = VerificationOutcome.FAILED_TEST_TIMEOUT
+    elif tests_ran and tests_passed is False:
         outcome = VerificationOutcome.FAILED_TEST
     elif detector_clear is True:
         outcome = VerificationOutcome.PASS
