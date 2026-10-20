@@ -59,7 +59,7 @@ This runs the course check script on your last commit, using only the stub.
 
 These are the limits of the detector, which are known now. The limitations found by running the model are recorded in `EVAL.md` and will be summarised here.
 
-- Only call sites are detected. A method on an already-built key, such as `key.sign(...)`, needs type inference and is not found.
+- Only call sites are detected. A method on an already-built key, such as `key.sign(...)`, needs type inference and is not found. The exception is RSA `sign`/`verify`, which is recognised by the `padding.PSS` or `padding.PKCS1v15` argument it must be given. The same padding passed to `encrypt`/`decrypt` is not flagged.
 - Imports are collected for the whole file. If a local variable shadows an imported name, the detector does not notice.
 - Relative imports and `from x import *` are not resolved.
 - ECDSA versus ECDH is decided by how the key is used, not by the call, so an elliptic-curve key generation call is reported with the generic `EC` family.
