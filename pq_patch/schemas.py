@@ -31,6 +31,7 @@ class Algorithm(str, Enum):
     """Classical algorithm family, assigned by the deterministic detector."""
 
     RSA = "RSA"
+    EC = "EC"  # generic elliptic-curve key; ECDSA vs ECDH is decided by usage, not by the call
     ECDSA = "ECDSA"
     ECDH = "ECDH"
     DSA = "DSA"
@@ -77,7 +78,10 @@ class Finding(_Model):
     line: int = Field(ge=1)
     end_line: int = Field(ge=1)
     column: int = Field(ge=0)
-    original_call: str = Field(min_length=1, description="Resolved call, e.g. 'rsa.generate_private_key'")
+    original_call: str = Field(min_length=1, description="Call as written in source, e.g. 'rsa.generate_private_key'")
+    qualified_name: str = Field(
+        min_length=1, description="Import-resolved name, stable across line shifts and aliases"
+    )
     algorithm: Algorithm
     enclosing_scope: Optional[str] = Field(
         default=None, description="Name of the enclosing function/class, or None at module level"

@@ -18,7 +18,9 @@ from pq_patch.schemas import (
 def make_finding(**kw):
     base = dict(
         file="a.py", line=5, end_line=5, column=4,
-        original_call="rsa.generate_private_key", algorithm=Algorithm.RSA,
+        original_call="rsa.generate_private_key",
+        qualified_name="cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key",
+        algorithm=Algorithm.RSA,
         enclosing_scope="make_key", scope_start_line=3, scope_end_line=8,
     )
     base.update(kw)
