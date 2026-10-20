@@ -1,0 +1,9 @@
+{
+  "plan": {
+    "usage_context": "signing",
+    "target_algorithm": "Dilithium3",
+    "approach": "Replace the signing call with a post-quantum signature scheme.",
+    "interface_notes": "",
+    "risks": []
+  }
+}

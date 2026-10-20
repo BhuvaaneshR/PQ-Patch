@@ -141,6 +141,32 @@ class Plan(_Model):
         return self
 
 
+class Escalation(_Model):
+    """The planner's way of saying a call site is out of scope or unclear (not signing)."""
+
+    reason: str = Field(min_length=5, max_length=1000)
+
+
+class PlanReply(BaseModel):
+    """What the planner call returns: exactly one of ``plan`` or ``escalate``.
+
+    This is an envelope. It ignores unknown top-level keys, because the course stub
+    returns one shared reply (``{"plan": ..., "patch": ...}``) for every call and each
+    stage reads only its own key. ``Plan`` and ``Escalation`` stay strict.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    plan: Optional[Plan] = None
+    escalate: Optional[Escalation] = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "PlanReply":
+        if (self.plan is None) == (self.escalate is None):
+            raise ValueError("reply must contain exactly one of 'plan' or 'escalate'")
+        return self
+
+
 _IMPORT_RE = re.compile(r"^(import\s+[\w.]+(\s+as\s+\w+)?|from\s+[\w.]+\s+import\s+[\w*,\s()]+)$")
 
 

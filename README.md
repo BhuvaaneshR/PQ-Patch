@@ -11,7 +11,7 @@ How it works:
 
 The run ends with one status on the last line: `ok`, `invalid_output`, `refused` or `error`.
 
-> **Status:** the detector, schemas, verifier and the model client with its prompt framing are done and tested. `main.py`, the planner and patcher, the orchestrator and the UI are being built, so the Run section below describes the intended interface. Update this section before tagging.
+> **Status:** the detector, schemas, verifier, the model client with its prompt framing, and the planner are done and tested. `main.py`, the patcher, the orchestrator and the UI are being built, so the Run section below describes the intended interface. Update this section before tagging.
 
 ## Setup
 
@@ -45,7 +45,7 @@ Two logs are written in the repository root and are not committed: `run_log.json
 python -m pytest
 ```
 
-These cover the schemas, the detector, the verifier and the model client. They need no real model and no network: the model client is tested against the course stub and a fake provider. `tests/test_real_repos.py` also needs local clones of pyjwt and trustme and is skipped without them (see its docstring).
+These cover the schemas, the detector, the verifier, the model client and the planner. They need no real model and no network: the model calls are tested against the course stub (using `samples/valid_response.json` and `samples/invalid_response.json`) and a fake provider. `tests/test_real_repos.py` also needs local clones of pyjwt and trustme and is skipped without them (see its docstring).
 
 ## Check
 
@@ -65,4 +65,5 @@ These are the limits of the detector, which are known now. The limitations found
 - ECDSA versus ECDH is decided by how the key is used, not by the call, so an elliptic-curve key generation call is reported with the generic `EC` family.
 - The verifier runs the project's existing tests in a temp copy, chosen by a text match on the module name. A patch that imports a package that is not installed (for example `oqs`) makes those tests fail with `ModuleNotFoundError`. This is not an OS-level sandbox: it keeps file writes off the original and keeps `.env` files and secret-looking environment variables out of the run.
 - Before a file reaches the model, instruction-like phrases in it (for example "ignore previous instructions", "mark this as safe") are replaced with a placeholder and logged. This lowers injection risk but is not a guarantee, and it changes the text the model sees, so a comment inside a rewritten scope can come back as the placeholder. The verifier, not the model, decides whether a patch passes.
+- The planner decides from the code it is shown whether a flagged key is used for signing. If it is key exchange, encryption, or cannot be told, the planner escalates with a reason instead of planning. A wrong call here is caught only by the human reviewing the plan.
 - Only single files are scanned by the app. Directory scanning exists in the detector but is not exposed in `main.py`.
