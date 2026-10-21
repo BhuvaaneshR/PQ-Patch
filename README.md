@@ -45,7 +45,13 @@ Two logs are written in the repository root and are not committed: `run_log.json
 python -m pytest
 ```
 
-These cover the schemas, the detector, the verifier, the model client and the planner. They need no real model and no network: the model calls are tested against the course stub (using `samples/valid_response.json` and `samples/invalid_response.json`) and a fake provider. `tests/test_real_repos.py` also needs local clones of pyjwt and trustme and is skipped without them (see its docstring).
+To run the tests that call the real model set in `.env` (they spend free-tier quota and are excluded from the normal run):
+
+```bash
+python -m pytest -m live
+```
+
+The normal run covers the schemas, the detector, the verifier, the model client and the planner. It needs no real model and no network: the model calls are tested against the course stub (using `samples/valid_response.json` and `samples/invalid_response.json`) and a fake provider. `tests/test_real_repos.py` also needs local clones of pyjwt and trustme and is skipped without them (see its docstring).
 
 ## Check
 

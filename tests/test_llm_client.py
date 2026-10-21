@@ -275,6 +275,30 @@ def test_extract_json_rejects_the_rest(text):
         extract_json(text)
 
 
+def test_sdk_level_retries_are_switched_off_so_one_log_line_is_one_call(harness):
+    class SdkLike(FakeClient):
+        def with_options(self, **opts):
+            self.opts = opts
+            return self
+
+    h = harness()
+    sdk = SdkLike(reply(json.dumps(VALID)))
+    h.llm._client_factory = lambda: sdk
+    h.llm._model_name = lambda: "fake"
+    assert h.llm.call(MESSAGES, Reply).status == "ok"
+    assert sdk.opts == {"max_retries": 0}
+
+
+def test_max_retry_delay_comes_from_the_environment(monkeypatch):
+    monkeypatch.delenv("LLM_MAX_RETRY_DELAY", raising=False)
+    assert StructuredLLM().max_delay == 5.0
+    monkeypatch.setenv("LLM_MAX_RETRY_DELAY", "60")
+    assert StructuredLLM().max_delay == 60.0
+    monkeypatch.setenv("LLM_MAX_RETRY_DELAY", "not a number")
+    assert StructuredLLM().max_delay == 5.0
+    assert StructuredLLM(max_delay=2).max_delay == 2  # an explicit value wins
+
+
 def test_default_wiring_uses_client_py(monkeypatch):
     import client
 

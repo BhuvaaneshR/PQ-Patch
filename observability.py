@@ -47,8 +47,11 @@ from datetime import datetime, timezone
 # client's question with a number you did not work for.
 # --------------------------------------------------------------------------
 
-PRICE_IN_PER_MTOK = 0.075   # input / prompt tokens
-PRICE_OUT_PER_MTOK = 0.30   # output / completion tokens
+# openai/gpt-oss-120b on Groq: $0.15 in, $0.60 out per million tokens, from Groq's model page
+# (console.groq.com/docs/model/openai/gpt-oss-120b, checked 2026-10-21). The free tier actually
+# charges $0, so these are the list-price figure to report next to $0 (see EVAL.md).
+PRICE_IN_PER_MTOK = 0.15    # input / prompt tokens
+PRICE_OUT_PER_MTOK = 0.60   # output / completion tokens
 
 LOG_PATH = os.getenv("RUN_LOG_PATH", "run_log.jsonl")
 
