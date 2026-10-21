@@ -81,7 +81,8 @@ def live_llm(tmp_path, security_events):
             "put a real provider in .env: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL "
             "(and make sure python-dotenv is installed, or .env is ignored)"
         )
-    return StructuredLLM(max_delay=65, timeout=90, log_path=str(tmp_path / "run_log.jsonl"))
+    # No cache and no fallback: a live test must reach the one model it reports on.
+    return StructuredLLM(max_delay=65, timeout=90, log_path=str(tmp_path / "run_log.jsonl"), cache=None, fallback_models=[])
 
 
 @pytest.fixture

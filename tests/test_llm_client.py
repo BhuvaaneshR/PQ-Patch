@@ -205,9 +205,17 @@ def test_server_errors_are_retried(harness):
 
 
 def test_retry_delay_is_capped(harness):
-    h, _ = with_fake(harness, HTTPError(429, retry_after=600), reply(json.dumps(VALID)), max_delay=5)
+    h, _ = with_fake(harness, HTTPError(503, retry_after=600), reply(json.dumps(VALID)), max_delay=5)
     h.llm.call(MESSAGES, Reply)
     assert h.sleeps == [5]
+
+
+def test_a_rate_limit_longer_than_the_cap_is_not_retried(harness):
+    # Waiting 5 s and calling again would only be refused again, so the call ends at once.
+    h, fake = with_fake(harness, HTTPError(429, retry_after=600), reply(json.dumps(VALID)), max_delay=5)
+    r = h.llm.call(MESSAGES, Reply)
+    assert (r.status, r.calls) == ("error", 1) and len(fake.calls) == 1 and h.sleeps == []
+    assert "rate limited" in r.error and "10m" in r.error
 
 
 def test_model_refusal_flag_is_a_refusal(harness):

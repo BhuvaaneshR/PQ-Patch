@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from pq_patch.rate_limit import classify, describe_wait
+
 PREFLIGHT_MESSAGE = [{"role": "user", "content": "Reply with the single word: ok"}]
 
 
@@ -36,7 +38,14 @@ def preflight(client: Any, model: str, base_url: str) -> Optional[str]:
         elif code in (401, 403):
             reason = f"the provider rejected the API key (HTTP {code}). Check LLM_API_KEY in .env"
         elif code == 429:
-            reason = "the provider is rate limiting you right now (HTTP 429). Wait a minute, or check your free-tier limits"
+            limit = classify(e)
+            if limit is not None and limit.daily:
+                reason = (
+                    f"the daily token quota for {model!r} is used up (HTTP 429); the provider allows another call in about "
+                    f"{describe_wait(limit.wait)}. Set LLM_FALLBACK_MODELS in .env to use another model meanwhile"
+                )
+            else:
+                reason = "the provider is rate limiting you right now (HTTP 429). Wait a minute, or check your free-tier limits"
         elif "Connection" in name or "Timeout" in name:
             reason = f"cannot reach {base_url!r} ({name}). Check LLM_BASE_URL in .env and your network"
         else:
