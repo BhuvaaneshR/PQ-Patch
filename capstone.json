@@ -1,0 +1,6 @@
+{
+  "sample_input": "samples/sample_input.py",
+  "injected_input": "samples/injected_input.py",
+  "floor_item_6": "documents",
+  "ui_command": "streamlit run app.py"
+}
