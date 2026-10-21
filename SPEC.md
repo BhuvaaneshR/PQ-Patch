@@ -6,7 +6,7 @@ It is an agent in the sense that matters here: a model drafts a plan and then a 
 
 Only signing is in scope. Key exchange, encryption and other uses are reported and escalated to a person, never patched.
 
-> **Status.** Built and tested: the detector, schemas, verifier, model client and planner. Not built yet: the patcher, the orchestrator, the report/export, `main.py` and the UI. Checks marked † below need `main.py`.
+> **Status.** Everything described here is built and covered by offline tests: detector, schemas, verifier, model client (with rate-limit handling), planner, patcher, orchestrator, report/export, `main.py` and the Streamlit UI. What has not been done is a measured run against a real model over the evaluation set (see `EVAL.md`).
 
 # Inputs
 
@@ -15,7 +15,8 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 - **Limits, enforced before any model call.** The file must be non-empty, at most 262,144 bytes (256 KiB), have a `.py` extension, and parse as Python. Otherwise the run ends with exit code 2, makes no model call and writes no `run_log.jsonl` line. A file that does not parse is reported with the reason, never silently skipped.
 - **Optional project folder** (UI and library): used by the verifier to run the project's existing tests against the patch in a temp copy.
 - **Reviewer feedback** (UI): free text, at most 2,000 characters, sent to the model when a plan is revised or a patch is retried.
-- **Configuration** is three variables in `.env`: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`. Any OpenAI-compatible provider works. `LLM_BASE_URL=local://stub` selects the course's offline stub, which exists to trigger failures on purpose and is not how the product is used.
+- **Configuration** is three variables in `.env`: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`. Any OpenAI-compatible provider works. `LLM_BASE_URL=local://stub` selects the course's offline stub, which exists to trigger failures on purpose and is not how the product is used. Four optional variables deal with a provider that limits tokens (all off unless set): `LLM_FALLBACK_MODELS` (comma-separated models to use when the main one is out of quota), `LLM_TPM_LIMIT` (pace calls to stay under a tokens-per-minute limit), `LLM_CACHE=1` and `LLM_CACHE_DIR` (store validated replies so a repeated step costs no tokens), and `LLM_MAX_RETRY_DELAY` (the longest wait for a per-minute limit, default 5 s).
+- **Command line:** `python main.py <file> [--project-root DIR] [--out DIR] [--ask] [--cache]`. `--ask` puts a person at every checkpoint in the terminal; without it the plan is approved automatically so the command can run unattended.
 
 # Outputs
 
@@ -40,7 +41,9 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 - `status` is one of `ready_for_review` (patch verified `pass`; a person still has to review it), `escalated` (out of scope, or retries ran out; `notes` says why) or `no_action_needed` (nothing to patch; no patch is fabricated).
 - `verification_result` is one of `pass`, `failed_compile`, `failed_test`, `failed_test(timeout)`, `needs_review`. `pass` means the patch compiles, the original call is gone, nothing new was introduced and any existing tests passed. It does not mean the patch is correct.
 
-**Run status** (last line of stdout, and the `status` of the last `run_log.jsonl` line): `ok`, `invalid_output`, `refused` or `error`. If a model call ends in anything but `ok`, the run stops there with that status and any later findings are listed as not attempted.
+**Run status** (last line of stdout, and the `status` of the last `run_log.jsonl` line): `ok`, `invalid_output`, `refused` or `error`. If a model call ends in anything but `ok`, the run stops there with that status and any later findings are listed as not attempted. A reply taken from the cache makes no model call and writes no log line; stderr says how many were reused.
+
+**Who decides what.** Each finding moves through `detected -> planning -> awaiting_plan_approval -> patching -> verifying -> ready_for_review`, or into `awaiting_failure_decision` or `escalated`. Code moves it; the model never chooses the next step. The only way from `awaiting_plan_approval` to `patching` is a person approving the plan. In the UI, three attempts per finding and three plan revisions are allowed; `main.py` makes one attempt and escalates a failed check, because retrying is a person's decision.
 
 **Exit codes:** `0` for `ok`; `1` for `invalid_output`, `refused` or `error`; `2` when the input is rejected before any model call.
 
@@ -55,6 +58,7 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 | Model refuses (`stub:refused`) | Not retried, no plan | `refused`, exit 1 |
 | Call raises or the provider is down (`stub:error`) | Up to 3 calls with capped backoff, then gives up | `error`, exit 1 |
 | Rate limited (`stub:ratelimit`) | Waits as the provider asks (capped), gives up after 3 calls | `error`, exit 1 |
+| Daily quota used up (HTTP 429 naming a per-day limit), or a wait longer than `LLM_MAX_RETRY_DELAY` | Not retried: that model is marked unavailable until the provider says it resets, the next of `LLM_FALLBACK_MODELS` is tried if there is one, otherwise the call ends at once saying when to try again. The UI shows the model as out of quota and offers retry later | `error`, exit 1 |
 | One transient failure (`stub:flaky`) | Retries and continues | `ok`, exit 0 |
 | Injected instructions in the file (`stub:obedient`) | Phrases are replaced before the call and logged; the model never sees them; the result is validated and verified as normal | `ok`, exit 0, guard event logged |
 | Model says the call is not signing, or cannot tell | Escalated with its reason; no patch is drafted | row `escalated` |
@@ -64,21 +68,24 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 | Patch renames or removes a function, or changes its parameters (names, order, kinds), so callers would break | Sent back to the model once, like an assumption; annotations and defaults may change (a key becoming `bytes` is expected) | `needs_review`, never `pass` |
 | Original call still present, or a new one introduced | `needs_review` | row not `ready_for_review` |
 | Existing tests fail / do not finish in 30 s | `failed_test` / `failed_test(timeout)` with the output | row not `ready_for_review` |
-| Retry limit reached (3 attempts per finding) | Escalated with the last failure output | row `escalated` |
+| Retry limit reached (3 attempts per finding, UI) | Escalated with the last failure output | row `escalated` |
+| `failed_test(timeout)` | Offers a re-check of the same patch with a longer timeout (up to 300 s), which is not a new attempt and is not escalated at the attempt limit | row waits for a person |
+| The model step fails (`invalid_output`, `refused`, `error`) in the UI | The finding waits for a person, who can retry the step; a failed model step does not use up an attempt | row waits for a person |
+| Two findings in one function | Each patch rewrites the whole function from the original, so both rows carry a note to review them together and apply only one diff | notes on both rows |
 | Nothing flagged | No model call, no patch | row `no_action_needed` |
 
 # Acceptance checks
 
-Each check is a command. † means it needs `main.py`.
+Each check is a command.
 
 1. Unit tests, no model or network needed: `python -m pytest` (all pass).
 2. The detector on a real project: with pyjwt cloned to `../targets/pyjwt`, `python -m pytest tests/test_real_repos.py` expects 6 findings in `jwt/algorithms.py`.
-3. † Happy path against the stub: `python main.py samples/sample_input.py`, with `.env` set to `LLM_BASE_URL=local://stub` and `LLM_MODEL=stub:ok`. Last line `ok`, exit 0, `run_log.jsonl` has one line per model call with nine keys and one `run_id`.
-4. † Bad replies: with `stub:malformed`, `stub:badshape` and `stub:empty` the last line is `invalid_output`, exit 1, no file written other than the two logs. With `stub:refused` it is `refused`; with `stub:error` it is `error`.
-5. † Bad input: an empty file and a file over 256 KiB each exit 2, make no model call and add no log line.
-6. † Injection: `python main.py samples/injected_input.py` with `stub:obedient` ends `ok`; the marker `PWNED-7F3A` appears in neither stdout nor any stored file; `security_log.jsonl` contains `instruction_ignored` and `guardrail_input`.
-7. † The course check: `python check_capstone.py .` (needs the `capstone-submission` tag when marking).
-8. † Human gate: with no approval given, the UI stays at "awaiting plan approval" and drafts no patch.
+3. Happy path against the stub: `python main.py samples/sample_input.py`, with `.env` set to `LLM_BASE_URL=local://stub` and `LLM_MODEL=stub:ok`. Last line `ok`, exit 0, `run_log.jsonl` has one line per model call with nine keys and one `run_id`.
+4. Bad replies: with `stub:malformed`, `stub:badshape` and `stub:empty` the last line is `invalid_output`, exit 1, no file written other than the two logs. With `stub:refused` it is `refused`; with `stub:error` it is `error`.
+5. Bad input: an empty file and a file over 256 KiB each exit 2, make no model call and add no log line.
+6. Injection: `python main.py samples/injected_input.py` with `stub:obedient` ends `ok`; the marker `PWNED-7F3A` appears in neither stdout nor any stored file; `security_log.jsonl` contains `instruction_ignored` and `guardrail_input`.
+7. The course check: `python check_capstone.py .` (needs the `capstone-submission` tag when marking).
+8. Human gate: with no approval given, the UI stays at "awaiting plan approval" and drafts no patch (`tests/test_app.py`, headless; or open the sample in `streamlit run app.py`).
 9. Every status in `samples/run_log_sample.jsonl` is one of the four, and every line has the nine keys.
 
 # Out of scope
