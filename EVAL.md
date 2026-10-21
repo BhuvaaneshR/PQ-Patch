@@ -3,6 +3,8 @@
 Eight inputs for PQ-Patch, covering the five kinds the course asks for. They run through `main.py` against the real model configured in `.env`, not the stub, because the stub only shows that the app survives and a real model shows whether it is right.
 
 > **Status: defined, not yet run.** The planner is built but the patcher, the orchestrator and `main.py` are not, so the Result column is empty and every number below is "not measured". Nothing here is a result yet. Fill the Result column, the metrics and the known failures from a real run, with the model, provider and date.
+>
+> Where the evidence will come from: `python -m pytest -m live` runs the planner and patcher on the real model and records, per test, the plan, the patch and diff, the verifier's verdict, tokens, latency and list-price cost in `eval_results/` (git-ignored). `python scripts/summarize_live.py --failures` turns several runs into a pass rate per scenario. These cover rows 1 and 5 and parts of rows 6 and 7 only; the full rows need `main.py`.
 
 Rows 1 and 2 reuse `samples/sample_input.py` and a second fixture to be added; row 5 is `samples/injected_input.py`; row 8 uses a clone of pyjwt at `../targets/pyjwt`.
 

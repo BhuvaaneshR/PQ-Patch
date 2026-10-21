@@ -58,7 +58,9 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 | One transient failure (`stub:flaky`) | Retries and continues | `ok`, exit 0 |
 | Injected instructions in the file (`stub:obedient`) | Phrases are replaced before the call and logged; the model never sees them; the result is validated and verified as normal | `ok`, exit 0, guard event logged |
 | Model says the call is not signing, or cannot tell | Escalated with its reason; no patch is drafted | row `escalated` |
+| Patch does not parse as the model wrote it (for example JSON escaped twice, or non-breaking hyphens) | Repaired by code only if the repaired text parses; otherwise sent back to the model once with the compiler message and the offending line | repaired or revised patch is shown; if still broken, `failed_compile` |
 | Patch does not compile | Reported as `failed_compile` with the compiler message; a person may retry with guidance | row not `ready_for_review` |
+| Patch assumes something about the caller's code (a method the original never used on a parameter, an "assume" or TODO comment) | Sent back to the model once; the better draft is kept and what remains is listed | `needs_review`, never `pass` |
 | Original call still present, or a new one introduced | `needs_review` | row not `ready_for_review` |
 | Existing tests fail / do not finish in 30 s | `failed_test` / `failed_test(timeout)` with the output | row not `ready_for_review` |
 | Retry limit reached (3 attempts per finding) | Escalated with the last failure output | row `escalated` |

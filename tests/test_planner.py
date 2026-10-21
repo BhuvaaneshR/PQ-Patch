@@ -167,6 +167,7 @@ def test_prompt_has_finding_imports_and_scope_and_the_schema(fake):
     assert "escalate" in system and "target_algorithm" in system  # schema is in the system message
     assert "ML-DSA-44, ML-DSA-65, ML-DSA-87" in user  # allowed targets are in the task text
     assert "import oqs" in user and "oqs.Signature" in user  # the replacement library is named
+    assert "raw `bytes`" in user and "escalate rather than guess" in user  # keys become bytes; no guessing
     assert "rsa.generate_private_key" in user and "line 7" in user and "make_key" in user
     assert "<<<UNTRUSTED imports" in user and "from cryptography.hazmat.primitives.asymmetric import rsa" in user
     assert "<<<UNTRUSTED scope_code" in user and "key_size=bits" in user

@@ -7,6 +7,7 @@ from pq_patch.schemas import (
     Finding,
     FindingStatus,
     Patch,
+    PatchReply,
     Plan,
     ReportRow,
     UsageContext,
@@ -125,6 +126,34 @@ def test_patch_rejects_non_import_statements(bad):
 def test_patch_rejects_empty_source():
     with pytest.raises(ValidationError):
         Patch(new_source="")
+
+
+def test_patch_rejects_blank_source():
+    with pytest.raises(ValidationError):
+        Patch(new_source="  \n\t\n")
+
+
+def test_patch_keeps_leading_whitespace_because_it_is_code():
+    # Stripping only the first line's indent would leave the other lines indented: a broken patch.
+    src = "    def f(self):\n        return 1\n"
+    assert Patch(new_source=src).new_source == src
+
+
+# ---- PatchReply ----
+
+def test_patch_reply_needs_exactly_one_of_patch_or_escalate():
+    with pytest.raises(ValidationError):
+        PatchReply.model_validate({})
+    with pytest.raises(ValidationError):
+        PatchReply.model_validate({"patch": {"new_source": "x = 1"}, "escalate": {"reason": "cannot do it"}})
+    assert PatchReply.model_validate({"patch": {"new_source": "x = 1"}}).patch is not None
+    assert PatchReply.model_validate({"escalate": {"reason": "needs a wider change"}}).escalate is not None
+
+
+def test_patch_reply_ignores_the_other_stages_key_but_patch_stays_strict():
+    assert PatchReply.model_validate({"plan": {"anything": 1}, "patch": {"new_source": "x = 1"}}).patch is not None
+    with pytest.raises(ValidationError):
+        PatchReply.model_validate({"patch": {"new_source": "x = 1", "surprise": True}})
 
 
 # ---- VerificationResult ----
