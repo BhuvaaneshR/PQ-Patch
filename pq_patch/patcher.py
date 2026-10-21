@@ -313,6 +313,7 @@ def apply_patch(finding: Finding, source: str, patch: Patch) -> AppliedPatch:
 def make_diff(display_name: str, original: str, patched: str) -> str:
     """Unified diff of the whole file, with ``a/`` and ``b/`` headers."""
     name = re.sub(r"^[A-Za-z]:", "", Path(display_name).as_posix()).lstrip("/")
+    name = re.sub(r"^(\.{1,2}/)+", "", name)  # a diff header names a path inside the project, never ../ or ./
 
     def prepared(text: str) -> list[str]:
         lines = split_lines(text)

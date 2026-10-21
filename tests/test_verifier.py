@@ -161,6 +161,15 @@ def test_a_patch_that_assumes_an_api_is_needs_review_even_though_everything_else
     assert "[review] needs a person" in r.output and "size.to_bits" in r.output
 
 
+def test_a_patch_that_renames_the_function_is_needs_review_not_pass(tmp_path):
+    (tmp_path / "signer.py").write_text(GUESS_ORIGINAL)
+    f = scan_file(tmp_path / "signer.py").findings[0]
+    r = verify(f, GUESS_ORIGINAL, "def make_signing_key(size):\n    return b'key'\n")
+    assert r.compile_ok and r.detector_clear is True  # compiles and the old call is gone...
+    assert r.outcome is VerificationOutcome.NEEDS_REVIEW  # ...but every caller of make_key would now break
+    assert "`make_key` no longer exists" in r.output
+
+
 def test_review_findings_do_not_hide_a_failing_test(tmp_path):
     project(tmp_path)
     patch = "def make_key():\n    # TODO make this real\n    return None\n"

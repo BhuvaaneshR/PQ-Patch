@@ -292,6 +292,12 @@ def test_diff_names_are_posix_and_never_absolute():
     assert make_diff("C:/Users/x/f.py", "a\n", "b\n").startswith("--- a/Users/x/f.py\n+++ b/Users/x/f.py\n")
 
 
+@pytest.mark.parametrize("given", ["../targets/pyjwt/jwt/a.py", "./pkg/a.py", "..\\..\\pkg\\a.py"])
+def test_diff_names_never_start_with_dot_dot_or_dot_slash(given):
+    header = make_diff(given, "a\n", "b\n").splitlines()[0]
+    assert header.startswith("--- a/") and "/../" not in header and not header.startswith(("--- a/../", "--- a/./"))
+
+
 def test_diff_handles_a_file_with_no_final_newline():
     assert make_diff("f.py", "a\nb", "a\nc").endswith("-b\n+c\n")
 
@@ -517,6 +523,24 @@ def test_display_name_is_used_in_the_diff_header(fake):
 GUESSING = json.dumps(
     {"patch": {"new_source": "def sign(key, m):\n    # Assume key provides export_secret_key()\n    return key.export_secret_key()\n"}}
 )
+
+
+RENAMED = json.dumps({"patch": {"new_source": "def sign_manifest(private_key, manifest):\n    return manifest\n"}})
+
+
+def test_a_draft_that_renames_the_function_is_sent_back_once_and_the_fix_is_used(fake):
+    llm, client = fake(RENAMED, GOOD)
+    r = patch_finding(finding_for(SRC), SRC, PLAN, llm=llm)
+    assert r.calls == 2 and r.problems == () and "def sign(key, m):" in r.patched_source
+    second = user_text(client, 1)
+    assert "`sign` no longer exists" in second and "static review of your patch found" in second
+
+
+def test_a_draft_that_renames_the_function_twice_is_reported_not_hidden(fake):
+    llm, _ = fake(RENAMED, RENAMED)
+    r = patch_finding(finding_for(SRC), SRC, PLAN, llm=llm)
+    assert r.calls == 2 and any("no longer exists" in p for p in r.problems)
+    assert verify(finding_for(SRC), SRC, r.patched_source).outcome.value == "needs_review"
 
 
 def test_a_clean_first_draft_costs_one_call_and_has_no_findings(fake):

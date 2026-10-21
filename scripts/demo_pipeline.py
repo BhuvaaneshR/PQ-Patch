@@ -2,6 +2,7 @@
 
     python scripts/demo_pipeline.py samples/sample_input.py
     python scripts/demo_pipeline.py samples/sample_input.py --project-root .
+    python scripts/demo_pipeline.py ../targets/pyjwt/jwt/algorithms.py --line 683 --pause 8
     python scripts/demo_pipeline.py --review-demo
 
 The model comes from .env (or from LLM_BASE_URL / LLM_MODEL set in the shell: use local://stub and
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,7 +74,7 @@ def check_environment(stub: bool) -> None:
               "Run: pip install python-dotenv openai", file=sys.stderr)
 
 
-def run(path: Path, project_root: Path | None) -> int:
+def run(path: Path, project_root: Path | None, only_line: int | None = None, pause: float = 0.0, limit: int | None = None) -> int:
     if not path.is_file():
         print(f"not a file: {path}", file=sys.stderr)
         return 2
@@ -93,8 +95,17 @@ def run(path: Path, project_root: Path | None) -> int:
     for f in scan.findings:
         print(f"line {f.line}: {f.original_call} [{f.algorithm.value}] in {f.enclosing_scope or '<module>'}")
 
+    chosen = [f for f in scan.findings if only_line is None or f.line == only_line]
+    if limit is not None:
+        chosen = chosen[:limit]
+    if len(chosen) != len(scan.findings):
+        print(f"\nprocessing {len(chosen)} of {len(scan.findings)} findings" + (f" (line {only_line})" if only_line else ""))
+    if not chosen:
+        print("no finding matches that selection")
+        return 2
+
     worst = 0
-    for f in scan.findings:
+    for f in chosen:
         heading(f"plan: {f.original_call} (line {f.line})")
         planned = plan_finding(f, source)
         print("outcome:", planned.outcome.value, "| model calls:", planned.calls)
@@ -109,6 +120,7 @@ def run(path: Path, project_root: Path | None) -> int:
         print("approach:", p.approach[:300])
         print("risks:", len(p.risks))
 
+        time.sleep(pause)  # a free tier limits tokens per minute; this spaces the calls out
         heading("patch")
         patched = patch_finding(f, source, p, display_name=str(path).replace("\\", "/"))
         print("outcome:", patched.outcome.value, "| model calls:", patched.calls)
@@ -128,6 +140,7 @@ def run(path: Path, project_root: Path | None) -> int:
         for line in v.output.splitlines():
             print("  ", line)
         worst = max(worst, 0 if v.outcome.value == "pass" else 1)
+        time.sleep(pause)
     heading("summary")
     print("every finding patched and verified `pass`" if worst == 0 else "at least one finding needs a person")
     return worst
@@ -138,13 +151,16 @@ def main() -> int:
     ap.add_argument("file", nargs="?", help="a .py file to analyse")
     ap.add_argument("--project-root", type=Path, help="run the project's own tests against the patch in a temp copy")
     ap.add_argument("--review-demo", action="store_true", help="show the static review on a known-bad patch (no model)")
+    ap.add_argument("--line", type=int, help="only process the finding on this line")
+    ap.add_argument("--limit", type=int, help="only process the first N findings")
+    ap.add_argument("--pause", type=float, default=0.0, help="seconds to wait between model calls (use ~8 on a free tier)")
     args = ap.parse_args()
     if args.review_demo:
         return review_demo()
     if not args.file:
         ap.print_usage(sys.stderr)
         return 2
-    return run(Path(args.file), args.project_root)
+    return run(Path(args.file), args.project_root, args.line, args.pause, args.limit)
 
 
 if __name__ == "__main__":
