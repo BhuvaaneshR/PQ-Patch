@@ -190,3 +190,9 @@ def test_summary_reads_every_live_file_in_a_folder_and_ignores_junk(tmp_path):
     (tmp_path / "other.jsonl").write_text(json.dumps(_record("zzz", True)) + "\n", encoding="utf-8")
     rows = summarize_live.summarize(summarize_live.load(tmp_path))
     assert [(r["test"], r["runs"], r["passed"]) for r in rows] == [("a", 2, 1)]
+
+
+def test_a_used_up_daily_quota_says_so_and_points_at_fallback_models():
+    text = "Rate limit reached on tokens per day (TPD): Limit 200000. Please try again in 8m22.5s."
+    msg = preflight(FakeClient(StatusError(429, text)), "openai/gpt-oss-120b", URL)
+    assert "daily token quota" in msg and "8m" in msg and "LLM_FALLBACK_MODELS" in msg

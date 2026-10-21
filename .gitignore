@@ -22,3 +22,6 @@ targets/
 
 # Evidence written by the live tests (python -m pytest -m live). Quote the numbers in EVAL.md instead.
 eval_results/
+
+# Stored model replies (LLM_CACHE=1): they contain rewritten code from your files.
+.llm_cache/
