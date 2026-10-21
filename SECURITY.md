@@ -16,7 +16,7 @@ The security problem is that the input is code, and code can contain text aimed 
 | The two logs | Written by us, read by people | Counts, timings, statuses, event names. No prompts, no replies, no code |
 | Provider network traffic | Out of our control | The scope code and imports of flagged calls leave the machine to the configured provider |
 
-Output leaves as text on stdout (reports and diffs) and as the two logs. The tool writes no other file.
+Output leaves as text on stdout (reports and diffs) and as the two logs. The tool writes no other file, except when asked: `--out DIR` writes the report and diffs there, and `LLM_CACHE=1` keeps validated model replies in `.llm_cache/` (git-ignored). The UI also offers downloads.
 
 # What an attacker could try
 
@@ -31,6 +31,9 @@ Someone who controls the file being scanned, or a dependency it pulls tests from
 7. **Resource exhaustion**: a huge file, deeply nested expressions that overflow the parser, tests that never finish, a provider that always rate-limits so the agent retries forever.
 8. **False reassurance**: getting a bad patch shown as safe, or a person trusting "pass" as proof of correctness.
 9. **Feedback injection**: hostile text pasted into the reviewer feedback box.
+10. **Exported text that runs as something else**: a note or diff starting with `=`, `+`, `-` or `@` that a spreadsheet executes as a formula when `report.csv` is opened; model text containing markdown or HTML that the UI would render (a link, an image that phones home).
+11. **A poisoned or stale cache entry**: a file in `.llm_cache/` edited by hand, or written under an older schema, so that something the schema would reject is shown as the model's reply.
+12. **Skipping the human**: any route from "plan drafted" to "patch drafted" that does not pass a person's approval, or an unbounded retry loop that burns tokens.
 
 # The guardrails in place
 
@@ -49,9 +52,14 @@ Someone who controls the file being scanned, or a dependency it pulls tests from
 | Model calls are bounded: 30 s timeout per call, 3 calls on errors with capped backoff, one re-ask, no retry on 400/401/403/404/422 | `pq_patch/llm_client.py:StructuredLLM` | 7 |
 | Deeply nested or null-byte input is reported as unparseable instead of crashing | `pq_patch/detector.py:scan_source` | 7 |
 | The run log holds counts, timings, status and model name only; the API key, prompts and replies are never written; `.env` and both logs are git-ignored | `pq_patch/llm_client.py:StructuredLLM._log`, `observability.py:log_call`, `.gitignore` | 5 |
-| Only `client.py` talks to a model; nothing else imports an SDK | `client.py` | 5 |
-
-Not built yet, and so not counted: the input checks in `main.py` (size, extension, parses; attack 7), the orchestrator's approval gate and attempt cap (attacks 4, 7, 8), and the UI's refusal to skip a checkpoint.
+| Only `client.py` talks to a model; nothing else imports an SDK, and the UI imports no model code at all (a test reads `app.py`'s imports) | `client.py`; `tests/test_app.py:test_the_ui_never_imports_client_or_a_model_sdk` | 5 |
+| The input is checked before any model call: `.py` extension, non-empty, at most 256 KiB, valid UTF-8, parses. Failing any ends with exit 2, no call, no log line | `pq_patch/orchestrator.py:read_input`, `check_source`; `main.py:main` | 7 |
+| Findings move only along a fixed transition table (an illegal move raises); the one way from `awaiting_plan_approval` to `patching` is a person's `approve_plan`; there is no skip action; three patch attempts and three plan revisions per finding, feedback capped at 2,000 characters, a test timeout of at most 300 s; the loop that works findings off is bounded | `pq_patch/orchestrator.py:_ALLOWED`, `Session.act`, `allowed_actions`, `run_pending` | 4, 7, 8, 12 |
+| `main.py` supplies the only bypass of the plan gate (auto-approve, so it can run unattended) and says so; `--ask` puts a person there, and closing the terminal escalates, never approves | `main.py:run_session`, `_approve_or_revise` | 12 |
+| A rate-limit reply is read, not just retried: a daily quota or a wait longer than the cap stops calls to that model (no spin on a dead quota), moves to the next configured fallback model or ends at once; optional pacing keeps tokens per minute under a limit | `pq_patch/rate_limit.py:classify`, `Pacer`; `pq_patch/llm_client.py:StructuredLLM.call` | 7 |
+| A cached reply is stored only after it validated, is validated again when read (an entry that no longer validates is ignored), is keyed by a hash of model and prompt, and is off for the offline stub and unless `LLM_CACHE=1` | `pq_patch/rate_limit.py:ReplyCache`; `pq_patch/llm_client.py:StructuredLLM._from_cache` | 11 |
+| CSV cells starting with `=`, `+`, `-`, `@`, tab or CR get a leading apostrophe; diff file names are built from the row's file name and line, never from model text | `pq_patch/report.py:_safe_cell`, `diff_name` | 10 |
+| The UI shows every model-written string with `st.text` or `st.code`, never as markdown or HTML | `app.py:finding_panel` | 10 |
 
 # What each guardrail does not stop
 
@@ -67,6 +75,10 @@ Not built yet, and so not counted: the input checks in `main.py` (size, extensio
 - **Secret scrubbing** works by file and variable name; a secret in a file with another name, or in a variable with an unlucky name, is copied.
 - **Logs** hold no content, but the scope code of every flagged call is sent to the model provider; the provider's own retention is outside our control.
 - **Reviewer feedback** is deliberately followed by the model, so anyone who can type there can steer it.
+- **The CLI's auto-approve** means `python main.py` never stops for a person. It still prints a diff and writes no file to the input, but nobody reviewed the plan; use `--ask` or the UI when that matters.
+- **The cache** keeps the model's reply, which contains rewritten code from your file, on disk in plain text. Delete `.llm_cache/` when that matters. Re-validation stops a malformed entry, not a well-formed one someone wrote by hand: anyone who can write that folder can choose what a cached step returns, though it still goes through the verifier like any patch.
+- **Quota handling** is a guess from the provider's wording ("per day", `TPD`, `try again in 8m`). A provider that phrases it differently is treated as a short rate limit and retried within the cap. A fallback model sends the same code to a second model, which may have different retention terms.
+- **The UI has no login.** It is meant to run on your own machine; anyone who can open the page can use the configured key through it.
 
 # What I would do with more time
 
