@@ -13,7 +13,6 @@ A deterministic state machine (`pq_patch/orchestrator.py`) moves each finding al
 
 The run ends with one status on the last line: `ok`, `invalid_output`, `refused` or `error`.
 
-> **Status:** every part is built and tested offline: detector, schemas, verifier, model client (with rate-limit handling), planner, patcher, orchestrator, report export, `main.py` and the UI. Not yet done: a measured run of the evaluation set against a real model (see `EVAL.md`).
 
 ## Setup
 
@@ -86,12 +85,9 @@ This runs the course check script on your last commit, using only the stub.
 
 These are the limits of the detector, which are known now. The limitations found by running the model are recorded in `EVAL.md` and will be summarised here.
 
-- Only call sites are detected. A method on an already-built key, such as `key.sign(...)`, needs type inference and is not found. The exception is RSA `sign`/`verify`, which is recognised by the `padding.PSS` or `padding.PKCS1v15` argument it must be given. The same padding passed to `encrypt`/`decrypt` is not flagged.
 - Imports are collected for the whole file. If a local variable shadows an imported name, the detector does not notice.
 - Relative imports and `from x import *` are not resolved.
-- ECDSA versus ECDH is decided by how the key is used, not by the call, so an elliptic-curve key generation call is reported with the generic `EC` family.
 - The verifier runs the project's existing tests in a temp copy, chosen by a text match on the module name. A patch that imports a package that is not installed (for example `oqs`) makes those tests fail with `ModuleNotFoundError`. This is not an OS-level sandbox: it keeps file writes off the original and keeps `.env` files and secret-looking environment variables out of the run.
-- Before a file reaches the model, instruction-like phrases in it (for example "ignore previous instructions", "mark this as safe") are replaced with a placeholder and logged. This lowers injection risk but is not a guarantee, and it changes the text the model sees, so a comment inside a rewritten scope can come back as the placeholder. The verifier, not the model, decides whether a patch passes.
 - The planner decides from the code it is shown whether a flagged key is used for signing. If it is key exchange, encryption, or cannot be told, the planner escalates with a reason instead of planning. A wrong call here is caught only by the human reviewing the plan.
 - The patcher rewrites the whole enclosing function, class or statement of a finding. A scope longer than 12,000 characters is escalated instead, because the model must see all the code it replaces. The patch is spliced in by code and shown as a diff; the file is never written.
 - A `pass` from the verifier means the patch compiles, the old call is gone, nothing new was flagged, a static review found no sign of a guess, and any existing tests passed. It does not mean the patch is correct. The review looks for the footprints of an assumption (a method called on a parameter the original never used, an "assume" or TODO comment, a docstring that still names the old algorithm). The first real-model patch assumed `private_key.export_secret_key()` exists, and this is how that is now caught. It cannot catch a guess that leaves no footprint, so a person has to read every diff.
