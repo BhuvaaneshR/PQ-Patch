@@ -6,6 +6,8 @@ rewrote ``private_key.sign(...)`` as ``private_key.export_secret_key()`` and sai
 Nothing in compile / detector / tests can catch that, so this module looks for the footprints:
 
 Problems (a person must look; the verifier will not return ``pass``):
+- A function that existed before is gone (renamed or removed), or its parameters (names, order, kinds)
+  changed. Callers would break. Annotations and defaults may change: a key becoming ``bytes`` is expected.
 - A function now reads or calls ``param.attr`` where the original never used that attribute of that
   parameter. The caller's object may not have it.
 - A new comment says the model is assuming something, or leaves a TODO / FIXME / placeholder.
@@ -68,6 +70,23 @@ def _params(func: ast.AST) -> set[str]:
     return {n for n in names if n not in _IGNORED_PARAMS}
 
 
+def _signature(func: ast.AST) -> tuple[tuple[str, str], ...]:
+    """Parameter kinds and names in order. Annotations and defaults are deliberately not compared."""
+    a = func.args  # type: ignore[attr-defined]
+    parts = [("pos-only", x.arg) for x in a.posonlyargs] + [("pos", x.arg) for x in a.args]
+    if a.vararg is not None:
+        parts.append(("*", a.vararg.arg))
+    parts += [("kw", x.arg) for x in a.kwonlyargs]
+    if a.kwarg is not None:
+        parts.append(("**", a.kwarg.arg))
+    return tuple(parts)
+
+
+def _show_signature(sig: tuple[tuple[str, str], ...]) -> str:
+    prefix = {"*": "*", "**": "**"}
+    return ", ".join(prefix.get(kind, "") + name for kind, name in sig)
+
+
 def _param_attributes(func: ast.AST) -> set[tuple[str, str]]:
     params = _params(func)
     return {
@@ -110,10 +129,19 @@ def _review_trees(original_source: str, patched_source: str, old_tree: ast.AST, 
     warnings: list[str] = []
     old_funcs, new_funcs = _functions(old_tree), _functions(new_tree)
 
+    for name in old_funcs:
+        if name not in new_funcs:
+            problems.append(f"`{name}` no longer exists: it was removed or renamed, so anything that calls it will break")
+
     for name, new_fn in new_funcs.items():
         old_fn = old_funcs.get(name)
         if old_fn is None or ast.dump(old_fn) == ast.dump(new_fn):
             continue
+        if _signature(old_fn) != _signature(new_fn):
+            problems.append(
+                f"`{name}` changed its parameters from ({_show_signature(_signature(old_fn))}) to "
+                f"({_show_signature(_signature(new_fn))}): callers may break"
+            )
         for param, attr in sorted(_param_attributes(new_fn) - _param_attributes(old_fn)):
             problems.append(
                 f"`{name}` now uses `{param}.{attr}`, which the original never did: this assumes the "

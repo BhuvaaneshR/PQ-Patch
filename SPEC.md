@@ -61,6 +61,7 @@ Only signing is in scope. Key exchange, encryption and other uses are reported a
 | Patch does not parse as the model wrote it (for example JSON escaped twice, or non-breaking hyphens) | Repaired by code only if the repaired text parses; otherwise sent back to the model once with the compiler message and the offending line | repaired or revised patch is shown; if still broken, `failed_compile` |
 | Patch does not compile | Reported as `failed_compile` with the compiler message; a person may retry with guidance | row not `ready_for_review` |
 | Patch assumes something about the caller's code (a method the original never used on a parameter, an "assume" or TODO comment) | Sent back to the model once; the better draft is kept and what remains is listed | `needs_review`, never `pass` |
+| Patch renames or removes a function, or changes its parameters (names, order, kinds), so callers would break | Sent back to the model once, like an assumption; annotations and defaults may change (a key becoming `bytes` is expected) | `needs_review`, never `pass` |
 | Original call still present, or a new one introduced | `needs_review` | row not `ready_for_review` |
 | Existing tests fail / do not finish in 30 s | `failed_test` / `failed_test(timeout)` with the output | row not `ready_for_review` |
 | Retry limit reached (3 attempts per finding) | Escalated with the last failure output | row `escalated` |

@@ -128,6 +128,63 @@ def test_old_algorithm_wording_in_an_unchanged_function_is_left_alone():
     assert review_patch(code, code.replace("k.sign()", "sign_bytes(k)")).warnings == ()
 
 
+# --- the interface must survive (found by running on real pyjwt code) --------------------------------------------
+
+
+def test_a_renamed_function_is_flagged_because_callers_would_break():
+    old = "class A:\n    def sign(self, msg, key):\n        return key.sign(msg)\n"
+    new = "class A:\n    def sign_manifest(private_key, manifest):\n        return private_key\n"
+    r = review_patch(old, new)
+    assert any("`A.sign` no longer exists" in p and "renamed" in p for p in r.problems)
+
+
+def test_a_removed_function_is_flagged():
+    assert any("`g` no longer exists" in p for p in review_patch("def f():\n    pass\n\ndef g():\n    pass\n", "def f():\n    pass\n").problems)
+
+
+@pytest.mark.parametrize(
+    "new_params,shown",
+    [
+        ("msg, key, extra", "(self, msg, key) to (self, msg, key, extra)"),
+        ("msg", "(self, msg, key) to (self, msg)"),
+        ("key, msg", "(self, msg, key) to (self, key, msg)"),
+        ("message, key", "(self, msg, key) to (self, message, key)"),
+        ("msg, key, *args", "to (self, msg, key, *args)"),
+        ("msg, *, key", "to (self, msg, key)"),
+    ],
+)
+def test_changed_parameters_are_flagged_and_both_signatures_are_shown(new_params, shown):
+    old = "class A:\n    def sign(self, msg, key):\n        return key.sign(msg)\n"
+    new = f"class A:\n    def sign(self, {new_params}):\n        return b''\n"
+    problems = review_patch(old, new).problems
+    assert any("changed its parameters" in p and shown in p for p in problems), problems
+
+
+def test_annotations_defaults_and_decorators_may_change_the_key_becoming_bytes_is_expected():
+    old = "def sign(msg: bytes, key: RSAPrivateKey, n=1) -> bytes:\n    return key.sign(msg)\n"
+    new = "@staticmethod_like\ndef sign(msg: bytes, key: bytes, n=2) -> bytes:\n    return key\n"
+    assert review_patch(old, new).problems == ()
+
+
+def test_adding_a_helper_does_not_count_as_changing_the_interface():
+    old = "def f(k):\n    return k.sign()\n"
+    assert review_patch(old, "def f(k):\n    return h(k)\n\ndef h(k):\n    return k\n").problems == ()
+
+
+def test_the_pyjwt_shaped_case_that_slipped_through_before():
+    """A method replaced by a module-level function with another name and parameters used to be a 'pass'."""
+    old = (
+        "class RSAAlgorithm:\n    def sign(self, msg: bytes, key: bytes) -> bytes:\n        return key.sign(msg)\n\n"
+        "    def verify(self, msg, key, sig):\n        return True\n"
+    )
+    new = (
+        "class RSAAlgorithm:\n    def sign_manifest(private_key, manifest: bytes) -> bytes:\n        return private_key\n\n"
+        "    def verify(self, msg, key, sig):\n        return True\n"
+    )
+    problems = review_patch(old, new).problems
+    assert len(problems) == 1 and "`RSAAlgorithm.sign` no longer exists" in problems[0]
+
+
 def test_unparseable_input_gives_an_empty_review_not_a_crash():
     assert review_patch("def f(:\n", CLEAN) == Review() and review_patch(ORIGINAL, "def f(:\n") == Review()
 
