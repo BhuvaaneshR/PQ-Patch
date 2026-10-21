@@ -3,20 +3,22 @@
 No LLM is involved, and nothing the model wrote is trusted: the patched file is
 checked by code that only looks at the patched source itself.
 
-Three checks, in order:
+Four checks, in order:
 
 1. Compile: the patched source must compile (``compile()``, which never runs it).
 2. Detector: the original finding must be gone, and no finding may have appeared
    that was not already in the original file. Findings are compared by
    (qualified name, enclosing scope), so moving code up or down does not matter.
-3. Tests: if a project root is given, the project is copied to a temp directory,
+3. Review: look for guesses the model made about code it cannot see (see
+   ``assumptions.py``), such as a new method call on a parameter the original never used.
+4. Tests: if a project root is given, the project is copied to a temp directory,
    the patched file is written into the copy, and the existing pytest tests that
    mention the module are run there under a timeout.
 
 The caller's files are never modified. Outcome mapping (see ``VerificationResult``):
 failed_compile, else failed_test(timeout) if the tests did not finish in time, else
-failed_test if the tests ran and failed, else pass if the detector is clear, else
-needs_review.
+failed_test if the tests ran and failed, else pass if the detector is clear and the
+review found no assumption, else needs_review.
 
 Known limits:
 - Running the tests executes project code (and the patch) in a subprocess. The temp
@@ -38,7 +40,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Union
 
+from .assumptions import review_patch
 from .detector import SKIP_DIRS, scan_source
+from .source_text import compile_error
 from .schemas import Finding, VerificationOutcome, VerificationResult
 
 DEFAULT_TEST_TIMEOUT = 30.0
@@ -56,16 +60,7 @@ _PYTEST_EXIT_NO_TESTS = 5
 # --------------------------------------------------------------------------
 
 
-def _compile_error(source: str, filename: str) -> Optional[str]:
-    """Why ``source`` does not compile, or None if it does. Never executes the code."""
-    try:
-        compile(source, filename, "exec", dont_inherit=True)
-    except SyntaxError as e:
-        where = f" (line {e.lineno})" if e.lineno else ""
-        return f"{type(e).__name__}: {e.msg}{where}"
-    except (ValueError, RecursionError, MemoryError) as e:
-        return f"{type(e).__name__}: {e}"
-    return None
+_compile_error = compile_error  # shared with the patcher; compiles only, never executes
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +237,15 @@ def verify(
     detector_clear, detector_msg = _check_detector(finding, original_source, patched_source, filename)
     sections.append(f"[detector] {'clear' if detector_clear else 'not clear' if detector_clear is False else 'not evaluated'}: {detector_msg}")
 
+    review = review_patch(original_source, patched_source)
+    if review.problems or review.warnings:
+        sections.append(
+            "[review] "
+            + "; ".join([f"needs a person: {p}" for p in review.problems] + [f"note: {w}" for w in review.warnings])
+        )
+    else:
+        sections.append("[review] no assumptions found")
+
     tests_ran, tests_passed, timed_out = False, None, False
     if project_root is None:
         sections.append("[tests] no project root given; tests not run")
@@ -261,7 +265,7 @@ def verify(
         outcome = VerificationOutcome.FAILED_TEST_TIMEOUT
     elif tests_ran and tests_passed is False:
         outcome = VerificationOutcome.FAILED_TEST
-    elif detector_clear is True:
+    elif detector_clear is True and not review.problems:
         outcome = VerificationOutcome.PASS
     else:
         outcome = VerificationOutcome.NEEDS_REVIEW

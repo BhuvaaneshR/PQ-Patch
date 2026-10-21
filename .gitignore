@@ -19,3 +19,6 @@ Thumbs.db
 
 #testing repo
 targets/
+
+# Evidence written by the live tests (python -m pytest -m live). Quote the numbers in EVAL.md instead.
+eval_results/

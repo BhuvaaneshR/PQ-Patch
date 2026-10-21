@@ -186,15 +186,44 @@ class Patch(_Model):
     reach the deterministic verifier and surface as ``failed_compile``.
     """
 
+    # Leading whitespace is part of code: stripping only the first line's indent would corrupt it.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
     new_source: str = Field(min_length=1, max_length=20000)
     imports: list[str] = Field(default_factory=list, max_length=10)
     explanation: str = Field(default="", max_length=2000)
+
+    @field_validator("new_source")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("new_source is blank")
+        return value
 
     @model_validator(mode="after")
     def _check_imports(self) -> "Patch":
         for stmt in self.imports:
             if "\n" in stmt or not _IMPORT_RE.match(stmt.strip()):
                 raise ValueError(f"not a single import statement: {stmt!r}")
+        return self
+
+
+class PatchReply(BaseModel):
+    """What the patcher call returns: exactly one of ``patch`` or ``escalate``.
+
+    An envelope like ``PlanReply``: it ignores unknown top-level keys (the course stub's shared
+    reply also carries ``plan``), while ``Patch`` and ``Escalation`` stay strict.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=False)
+
+    patch: Optional[Patch] = None
+    escalate: Optional[Escalation] = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "PatchReply":
+        if (self.patch is None) == (self.escalate is None):
+            raise ValueError("reply must contain exactly one of 'patch' or 'escalate'")
         return self
 
 

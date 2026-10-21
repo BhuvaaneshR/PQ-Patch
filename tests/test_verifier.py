@@ -132,6 +132,65 @@ def test_line_shifts_do_not_count_as_new_findings(tmp_path):
     assert run(tmp_path, patch).outcome is VerificationOutcome.PASS
 
 
+# --- review of guesses -----------------------------------------------------------
+
+
+GUESSING_PATCH = textwrap.dedent(
+    """
+    def make_key(size):
+        # Assume size has a to_bits() method
+        return size.to_bits()
+    """
+)
+GUESS_ORIGINAL = textwrap.dedent(
+    """
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    def make_key(size):
+        return rsa.generate_private_key(public_exponent=65537, key_size=size.bits)
+    """
+)
+
+
+def test_a_patch_that_assumes_an_api_is_needs_review_even_though_everything_else_passes(tmp_path):
+    (tmp_path / "signer.py").write_text(GUESS_ORIGINAL)
+    f = scan_file(tmp_path / "signer.py").findings[0]
+    r = verify(f, GUESS_ORIGINAL, GUESSING_PATCH)
+    assert r.compile_ok and r.detector_clear is True  # the old checks are all satisfied...
+    assert r.outcome is VerificationOutcome.NEEDS_REVIEW  # ...and still it is not a pass
+    assert "[review] needs a person" in r.output and "size.to_bits" in r.output
+
+
+def test_review_findings_do_not_hide_a_failing_test(tmp_path):
+    project(tmp_path)
+    patch = "def make_key():\n    # TODO make this real\n    return None\n"
+    assert run(tmp_path, patch).outcome is VerificationOutcome.FAILED_TEST
+
+
+def test_a_clean_patch_says_the_review_found_nothing(tmp_path):
+    project(tmp_path, tests=None)
+    r = run(tmp_path, GOOD_PATCH)
+    assert r.outcome is VerificationOutcome.PASS and "[review] no assumptions found" in r.output
+
+
+def test_a_stale_docstring_is_noted_but_does_not_block_a_pass(tmp_path):
+    original = textwrap.dedent(
+        '''
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        def make_key():
+            """Create an RSA key."""
+            return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        '''
+    )
+    (tmp_path / "signer.py").write_text(original)
+    f = scan_file(tmp_path / "signer.py").findings[0]
+    patched = 'def make_key():\n    """Create an RSA key."""\n    return b"ml-dsa-key"\n'
+    r = verify(f, original, patched)
+    assert r.outcome is VerificationOutcome.PASS
+    assert "[review] note: the docstring of `make_key` still names the old algorithm" in r.output
+
+
 # --- tests -------------------------------------------------------------------
 
 

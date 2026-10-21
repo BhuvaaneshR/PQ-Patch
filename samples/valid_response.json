@@ -8,5 +8,12 @@
       "ML-DSA keys and signatures are much larger than RSA-2048 ones.",
       "Anything that stores or parses PEM/DER keys, or expects an RSA signature size, must change too."
     ]
+  },
+  "patch": {
+    "new_source": "def sign_manifest(private_key, manifest: bytes) -> bytes:\n    \"\"\"Return an ML-DSA-65 signature over the manifest.\"\"\"\n    with oqs.Signature(\"ML-DSA-65\", secret_key=private_key) as signer:\n        return signer.sign(manifest)\n",
+    "imports": [
+      "import oqs"
+    ],
+    "explanation": "The RSA-PSS call is replaced by an oqs.Signature signer built from the secret key bytes. The function name, parameters and return type are unchanged."
   }
 }

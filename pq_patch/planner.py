@@ -14,7 +14,6 @@ redacted: it is meant to be followed.
 
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -27,6 +26,7 @@ from .llm_client import (
 )
 from .prompts import build_messages
 from .schemas import ALLOWED_TARGETS, Finding, Plan, PlanReply
+from .source_text import import_lines, split_lines, strip_eol
 
 DEFAULT_TARGET = "ML-DSA-65"
 MAX_FEEDBACK_CHARS = 2000
@@ -54,18 +54,6 @@ class PlanResult:
 # --------------------------------------------------------------------------
 # Context
 # --------------------------------------------------------------------------
-
-
-def _import_lines(source: str, lines: list[str]) -> str:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError as e:
-        raise ValueError(f"source does not parse: {e.msg} (line {e.lineno})") from None
-    spans = sorted(
-        {(n.lineno, n.end_lineno or n.lineno) for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))}
-    )
-    text = "\n".join("\n".join(lines[a - 1 : b]) for a, b in spans)
-    return text if len(text) <= MAX_IMPORT_CHARS else text[:MAX_IMPORT_CHARS] + "\n# [imports truncated]"
 
 
 def _scope_text(finding: Finding, lines: list[str]) -> tuple[str, int]:
@@ -107,11 +95,13 @@ def _task(finding: Finding, first_line: int, feedback: Optional[str]) -> str:
         "- Anything else (key exchange, key agreement, encryption, or you cannot tell from the code "
         "shown): do not write a plan. Explain why in an escalation.\n\n"
         "For a plan, describe in plain words which ML-DSA API replaces which call and how keys and "
-        "signatures are held; how the surrounding function signature or interface stays the same; and "
-        "the risks a reviewer should check (much larger keys and signatures, changed serialisation, "
-        "hashing behaviour, other code or services that expect the old format). Do not write the "
-        "patched code yet. Do not invent library functions or algorithm identifiers you are not sure "
-        "exist; say so in the risks instead.\n\n"
+        "signatures are held, and how the surrounding function signature or interface stays the same. "
+        "Keys held in variables or parameters become raw `bytes` after the move (ML-DSA keys are byte "
+        "strings), so say in interface_notes how callers must change. If the code cannot be migrated "
+        "without knowing what its callers pass, escalate rather than guess. List the risks a reviewer "
+        "should check (much larger keys and signatures, changed serialisation, hashing behaviour, other "
+        "code or services that expect the old format). Do not write the patched code yet. Do not invent "
+        "library functions or algorithm identifiers you are not sure exist; say so in the risks instead.\n\n"
         'Reply as {"plan": {...}} using the plan fields in the schema, or '
         '{"escalate": {"reason": "..."}}.'
     )
@@ -142,14 +132,14 @@ def plan_finding(
     reply problems come back as a non-planned outcome; ValueError means the caller passed
     inputs that cannot be planned (source does not match the finding, feedback too long).
     """
-    lines = source.splitlines()
+    lines = [strip_eol(x) for x in split_lines(source)]  # the parser's line numbering, not str.splitlines
     if finding.scope_end_line > len(lines):
         raise ValueError("finding does not match the source: its scope extends past the end of the file")
     if feedback is not None and len(feedback) > MAX_FEEDBACK_CHARS:
         raise ValueError(f"feedback is {len(feedback)} characters; the limit is {MAX_FEEDBACK_CHARS}")
 
     scope, first_line = _scope_text(finding, lines)
-    untrusted = {"imports": _import_lines(source, lines), "scope_code": scope}
+    untrusted = {"imports": import_lines(source, MAX_IMPORT_CHARS), "scope_code": scope}
     if previous_plan is not None:
         untrusted["previous_plan"] = previous_plan.model_dump_json(indent=2)
 
