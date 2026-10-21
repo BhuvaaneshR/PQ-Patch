@@ -16,7 +16,7 @@ import re
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _Model(BaseModel):
@@ -126,6 +126,15 @@ class Plan(_Model):
 
     usage_context: UsageContext
     target_algorithm: str
+
+    @field_validator("target_algorithm", mode="before")
+    @classmethod
+    def _ascii_hyphens(cls, value: object) -> object:
+        # Real models often emit non-breaking hyphens (U+2011) and other dashes in names such as
+        # "ML-DSA-65". They mean the same thing, so normalise them before the allow-list check.
+        if isinstance(value, str):
+            return re.sub("[‐‑‒–—−]", "-", value).strip()
+        return value
     approach: str = Field(min_length=10, max_length=2000)
     interface_notes: str = Field(
         default="", max_length=1000, description="How the surrounding signature/interface is preserved"

@@ -92,6 +92,18 @@ def test_plan_rejects_extra_fields():
         Plan(**plan_kw(verification="skip"))
 
 
+@pytest.mark.parametrize("dash", ["‐", "‑", "‒", "–", "—", "−"])
+def test_plan_normalises_unicode_dashes_in_the_target_name(dash):
+    # A real model wrote non-breaking hyphens throughout its prose; the same can happen in the name.
+    assert Plan(**plan_kw(target_algorithm=f"ML{dash}DSA{dash}65")).target_algorithm == "ML-DSA-65"
+    assert Plan(**plan_kw(target_algorithm=f" ML{dash}DSA{dash}87 ")).target_algorithm == "ML-DSA-87"
+
+
+def test_plan_still_rejects_a_look_alike_that_is_not_an_allowed_target():
+    with pytest.raises(ValidationError):
+        Plan(**plan_kw(target_algorithm="ML‑KEM‑768"))
+
+
 # ---- Patch ----
 
 def test_patch_valid():

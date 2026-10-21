@@ -95,7 +95,9 @@ def _task(finding: Finding, first_line: int, feedback: Optional[str]) -> str:
         "Background: a deterministic scanner flagged a call that uses RSA or elliptic-curve "
         "signatures, which a quantum computer could break. The only replacement allowed is the NIST "
         f"ML-DSA signature scheme (FIPS 204). Allowed targets: {targets}. Use {DEFAULT_TARGET} unless "
-        "the code gives a reason to pick another.\n\n"
+        "the code gives a reason to pick another. Assume the replacement uses the liboqs Python "
+        'bindings: `import oqs`, then `oqs.Signature("<target>")` with its generate_keypair, sign and '
+        "verify methods. Do not plan around any other library.\n\n"
         f"Flagged call: `{finding.original_call}` ({finding.algorithm.value} family), resolved as "
         f"{finding.qualified_name}.\n"
         f"Location: line {finding.line} of the file, inside {scope}. The scope code below starts at "

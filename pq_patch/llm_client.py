@@ -24,6 +24,7 @@ Nothing secret or large is logged: no API key, prompt or reply text, only counts
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ STATUS_REFUSED = "refused"
 STATUS_ERROR = "error"
 
 DEFAULT_TIMEOUT = 30.0  # seconds for one model call
+DEFAULT_MAX_RETRY_DELAY = 5.0
 _NON_RETRYABLE = frozenset({400, 401, 403, 404, 422})
 _REASK_ECHO_CHARS = 1500
 
@@ -143,6 +145,15 @@ def _retry_after(exc: BaseException) -> float:
         return 0.0
 
 
+def _default_max_delay() -> float:
+    """Longest wait between retries. 5 s keeps stub runs fast; set LLM_MAX_RETRY_DELAY=60 for a
+    real provider whose free tier rate-limits per minute and asks callers to wait."""
+    try:
+        return max(0.0, float(os.getenv("LLM_MAX_RETRY_DELAY", "")))
+    except ValueError:
+        return DEFAULT_MAX_RETRY_DELAY
+
+
 def _prompt_text(messages: Sequence[dict]) -> str:
     return "\n".join(str(m.get("content", "")) for m in messages)
 
@@ -161,7 +172,7 @@ class StructuredLLM:
         max_error_attempts: int = 3,
         max_reasks: int = 1,
         base_delay: float = 0.5,
-        max_delay: float = 5.0,
+        max_delay: Optional[float] = None,
         client_factory: Callable[[], Any] = _client.get_client,
         model_name: Callable[[], str] = _client.get_model,
         sleep: Callable[[float], None] = time.sleep,
@@ -171,7 +182,7 @@ class StructuredLLM:
         self.max_error_attempts = max(1, max_error_attempts)
         self.max_reasks = max(0, max_reasks)
         self.base_delay = base_delay
-        self.max_delay = max_delay
+        self.max_delay = _default_max_delay() if max_delay is None else max_delay
         self._client_factory = client_factory
         self._model_name = model_name
         self._sleep = sleep
@@ -229,7 +240,11 @@ class StructuredLLM:
         started = time.perf_counter()
         try:
             if self._client is None:
-                self._client = self._client_factory()
+                client = self._client_factory()
+                # The OpenAI SDK quietly retries 429/5xx itself, which would hide calls from the
+                # run log. Turn that off so that one log line is one call.
+                with_options = getattr(client, "with_options", None)
+                self._client = with_options(max_retries=0) if callable(with_options) else client
             response = self._client.chat.completions.create(
                 model=reply.model,
                 messages=list(messages),
